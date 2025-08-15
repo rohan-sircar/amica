@@ -78,20 +78,25 @@ export async function handleConfig(
     case "init":
       let localStorageData: Record<string, string> = {};
 
+      // Only sync keys that have been modified from defaults
       for (const key in defaults) {
         const localKey = prefixed(key);
-        const value = localStorage.getItem(localKey);
+        const localValue = localStorage.getItem(localKey);
+        const defaultValue = (<any>defaults)[key];
 
-        if (value !== null) {
-          localStorageData[key] = value;
-        } else {
-          // Append missing keys with default values
-          localStorageData[key] = (<any>defaults)[key];
+        // Only sync if localStorage value exists and is different from default
+        if (localValue !== null && localValue !== defaultValue) {
+          localStorageData[key] = localValue;
         }
       }
 
-      // Sync update to server config
-      await fetcher("POST", configUrl, localStorageData);
+      // Only sync if there are actual changes
+      if (Object.keys(localStorageData).length > 0) {
+        console.log("Syncing local config changes to server:", localStorageData);
+        await fetcher("POST", configUrl, localStorageData);
+      } else {
+        console.log("No local config changes to sync");
+      }
 
       break;
     case "fetch":

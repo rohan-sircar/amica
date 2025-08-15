@@ -1,5 +1,9 @@
 import { handleConfig, serverConfig } from "@/features/externalAPI/externalAPI";
 
+// Cached config values from server
+let cachedConfig: Record<string, string> = {};
+let isConfigLoaded = false;
+
 export const defaults = {
   // AllTalk TTS specific settings
   localXTTS_url: process.env.NEXT_PUBLIC_LOCALXTTS_URL ?? 'http://127.0.0.1:7851',
@@ -125,27 +129,39 @@ export function prefixed(key: string) {
   return `chatvrm_${key}`;
 }
 
-// Ensure syncLocalStorage runs only on the server side and once
-if (typeof window !== "undefined") {
-  (async () => {
-    await handleConfig("init");
-  })();
-} else {
-  (async () => {
+// Initialize config on both client and server
+(async () => {
+  try {
+    // First fetch server config
     await handleConfig("fetch");
-  })();
-}
+    
+    // Cache the server config
+    cachedConfig = {...serverConfig};
+    isConfigLoaded = true;
+
+    // Only sync local changes to server if external_api_enabled is true
+    if (typeof window !== "undefined" && cachedConfig.external_api_enabled === "true") {
+      await handleConfig("init");
+      // Update cache after init
+      cachedConfig = {...serverConfig};
+    }
+  } catch (error) {
+    console.error("Failed to initialize config:", error);
+  }
+})();
 
 export function config(key: string): string {
+  // First try cached config
+  if (isConfigLoaded && cachedConfig.hasOwnProperty(key)) {
+    return cachedConfig[key];
+  }
+
+  // Fallback to localStorage
   if (typeof localStorage !== "undefined" && localStorage.hasOwnProperty(prefixed(key))) {
     return (<any>localStorage).getItem(prefixed(key))!;
   }
 
-  // Fallback to serverConfig if localStorage is unavailable or missing
-  if (serverConfig && serverConfig.hasOwnProperty(key)) {
-    return serverConfig[key];
-  }
-
+  // Fallback to defaults
   if (defaults.hasOwnProperty(key)) {
     return (<any>defaults)[key];
   }
@@ -155,15 +171,19 @@ export function config(key: string): string {
 
 export async function updateConfig(key: string, value: string) {
   try {
-    const localKey = prefixed(key);
+    // First update server config
+    await handleConfig("update", { key, value });
 
-    // Update localStorage if available
+    // Then update localStorage cache
     if (typeof localStorage !== "undefined") {
-      localStorage.setItem(localKey, value);
+      localStorage.setItem(prefixed(key), value);
     }
 
-    // Sync update to server config
-    await handleConfig("update",{ key, value });
+    // Update the local cache for immediate access
+    cachedConfig[key] = value;
+
+    // Ensure cache is marked as loaded if it wasn't already
+    isConfigLoaded = true;
 
   } catch (e) {
     console.error(`Error updating config for key "${key}": ${e}`);
